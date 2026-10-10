@@ -3365,6 +3365,117 @@ app.delete(
   }
 );
 
+```js
+/* =========================================================
+   TELEGRAM BOT API — READ ONLY
+========================================================= */
+
+function botSecretValid(req) {
+  const configured = String(
+    process.env.NEXUS_BOT_SECRET || ""
+  ).trim();
+
+  const supplied = String(
+    req.headers["x-nexus-bot-secret"] || ""
+  ).trim();
+
+  if (!configured || !supplied) return false;
+
+  const a = Buffer.from(configured, "utf8");
+  const b = Buffer.from(supplied, "utf8");
+
+  if (a.length !== b.length) return false;
+
+  return crypto.timingSafeEqual(a, b);
+}
+
+function requireBotSecret(req, res) {
+  if (botSecretValid(req)) return true;
+
+  json(res, {
+    success: false,
+    error: "Unauthorized bot"
+  }, 401);
+
+  return false;
+}
+
+app.get("/api/internal/bot/stats", async (req, res) => {
+  try {
+    if (!requireBotSecret(req, res)) return;
+
+    const stats = await one(`
+      SELECT
+        (SELECT COUNT(*) FROM accounts)::integer AS users,
+        (SELECT COUNT(*) FROM accounts
+          WHERE enabled = TRUE)::integer AS active_users,
+        (SELECT COUNT(*) FROM gateways)::integer AS gateways,
+        (SELECT COUNT(*) FROM gateways
+          WHERE enabled = TRUE
+          AND status = 'online')::integer AS online_gateways,
+        (SELECT COUNT(*) FROM subscriptions
+          WHERE enabled = TRUE)::integer AS subscriptions
+    `);
+
+    return json(res, {
+      success: true,
+      stats: {
+        users: Number(stats.users || 0),
+        active_users: Number(stats.active_users || 0),
+        gateways: Number(stats.gateways || 0),
+        online_gateways: Number(stats.online_gateways || 0),
+        subscriptions: Number(stats.subscriptions || 0)
+      }
+    });
+  } catch (error) {
+    return json(res, {
+      success: false,
+      error: "Could not load statistics"
+    }, 500);
+  }
+});
+
+app.get("/api/internal/bot/users", async (req, res) => {
+  try {
+    if (!requireBotSecret(req, res)) return;
+
+    const users = await many(`
+      SELECT id, username, display_name, enabled,
+             data_limit, data_used, expires_at
+      FROM accounts
+      ORDER BY id DESC
+      LIMIT 10
+    `);
+
+    return json(res, { success: true, users });
+  } catch (error) {
+    return json(res, {
+      success: false,
+      error: "Could not load users"
+    }, 500);
+  }
+});
+
+app.get("/api/internal/bot/gateways", async (req, res) => {
+  try {
+    if (!requireBotSecret(req, res)) return;
+
+    const gateways = await many(`
+      SELECT id, name, region, status, enabled, latency, last_seen
+      FROM gateways
+      ORDER BY id DESC
+    `);
+
+    return json(res, { success: true, gateways });
+  } catch (error) {
+    return json(res, {
+      success: false,
+      error: "Could not load gateways"
+    }, 500);
+  }
+});
+```
+
 /* =========================================================
    GATEWAY SECRET AUTH
 ========================================================= */
