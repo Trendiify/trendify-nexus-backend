@@ -576,21 +576,27 @@ function getCookie(req, name) {
   return null;
 }
 
+
+
 function isHttpsRequest(req) {
+  if (!req || typeof req !== "object") {
+    return false;
+  }
+
   if (req.secure) {
     return true;
   }
 
-  const forwarded =
-    String(
-      req.headers["x-forwarded-proto"] || ""
-    )
-      .split(",")[0]
-      .trim()
-      .toLowerCase();
+  const forwarded = String(
+    req.headers?.["x-forwarded-proto"] || ""
+  )
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
 
   return forwarded === "https";
 }
+
 
 function setSessionCookie(
   req,
@@ -3365,7 +3371,7 @@ app.delete(
   }
 );
 
-```js
+
 /* =========================================================
    TELEGRAM BOT API — READ ONLY
 ========================================================= */
@@ -3474,7 +3480,7 @@ app.get("/api/internal/bot/gateways", async (req, res) => {
     }, 500);
   }
 });
-```
+
 
 /* =========================================================
    GATEWAY SECRET AUTH
@@ -3964,437 +3970,155 @@ async function cloudflareRequest(
    GATEWAY WORKER CODE
 ========================================================= */
 
+
 function getGatewayWorkerCode() {
   return `
 import { connect } from "cloudflare:sockets";
 
-const DEFAULT_REGION = "eu";
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store"
-    }
-  });
-}
+    const RAILWAY_HOST = String(
+      env.RAILWAY_TCP_PROXY_DOMAIN || ""
+    ).trim();
 
-function isWebSocket(request) {
-  return request.headers.get("Upgrade")?.toLowerCase() === "websocket";
-}
-
-function toBytes(data) {
-  if (data instanceof ArrayBuffer) {
-    return Promise.resolve(new Uint8Array(data));
-  }
-
-  if (ArrayBuffer.isView(data)) {
-    return Promise.resolve(
-      new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    const RAILWAY_PORT = Number(
+      env.RAILWAY_TCP_PROXY_PORT || 0
     );
-  }
 
-  if (data instanceof Blob) {
-    return data.arrayBuffer().then(function (buffer) {
-      return new Uint8Array(buffer);
-    });
-  }
-
-  return Promise.reject(new Error("Unsupported WebSocket payload"));
-}
-
-function uuidFromBytes(bytes) {
-  if (bytes.length < 17 || bytes[0] !== 0) {
-    throw new Error("Invalid VLESS handshake");
-  }
-
-  const hex = Array.from(bytes.slice(1, 17))
-    .map(function (byte) {
-      return byte.toString(16).padStart(2, "0");
-    })
-    .join("");
-
-  return hex.slice(0, 8) + "-" +
-    hex.slice(8, 12) + "-" +
-    hex.slice(12, 16) + "-" +
-    hex.slice(16, 20) + "-" +
-    hex.slice(20, 32);
-}
-
-async function gatewayAuth(uuid, env) {
-  const apiUrl = String(env.NEXUS_API_URL || "").trim().replace(/\\/+$/, "");
-  const secret = String(env.NEXUS_GATEWAY_SECRET || "").trim();
-  const gatewayId = String(env.GATEWAY_ID || "").trim();
-
-  if (!apiUrl || !secret || !gatewayId) {
-    throw new Error("Gateway authentication settings are missing");
-  }
-
-  const authUrl = new URL(apiUrl + "/api/internal/gateway/auth");
-  authUrl.searchParams.set("uuid", uuid);
-  authUrl.searchParams.set("gateway_id", gatewayId);
-
-  const response = await fetch(authUrl.toString(), {
-    method: "GET",
-    headers: {
-      "X-Nexus-Gateway-Secret": secret,
-      "Accept": "application/json"
-    }
-  });
-
-  const text = await response.text();
-  let data = {};
-
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {}
-
-  if (!response.ok || data.authorized !== true) {
-    throw new Error(data.error || "Gateway authorization failed");
-  }
-
-  return data;
-}
-
-async function handleVLESS(request, env) {
-  if (!isWebSocket(request)) {
-    return new Response("WebSocket required", {
-      status: 426,
-      headers: { "Upgrade": "websocket" }
-    });
-  }
-
-  const relayHost = String(env.RAILWAY_TCP_PROXY_DOMAIN || "").trim();
-  const relayPort = Number(env.RAILWAY_TCP_PROXY_PORT || 0);
-
-  if (
-    !relayHost ||
-    !Number.isInteger(relayPort) ||
-    relayPort < 1 ||
-    relayPort > 65535
-  ) {
-    return new Response("Railway TCP Proxy variables are not configured", {
-      status: 500
-    });
-  }
-
-  const pair = new WebSocketPair();
-  const client = pair[0];
-  const server = pair[1];
-
-  server.accept();
-  server.binaryType = "arraybuffer";
-
-  let firstMessageReceived = false;
-  let relayReady = false;
-  let closed = false;
-  let socket;
-  let reader;
-  let writer;
-  let writeChain = Promise.resolve();
-  const pendingMessages = [];
-
-  let resolveFirst;
-  let rejectFirst;
-
-  const firstMessagePromise = new Promise(function (resolve, reject) {
-    resolveFirst = resolve;
-    rejectFirst = reject;
-  });
-
-  const handshakeTimer = setTimeout(function () {
-    if (!firstMessageReceived) {
-      rejectFirst(new Error("VLESS handshake timeout"));
-    }
-  }, 10000);
-
-  function closeAll() {
-    if (closed) return;
-    closed = true;
-    clearTimeout(handshakeTimer);
-
-    try {
-      if (server.readyState === WebSocket.OPEN) {
-        server.close();
+    if (
+  url.pathname === "/" ||
+  url.pathname === "/health"
+) {
+  return new Response(
+    JSON.stringify({
+      success: true,
+      status: "online",
+      gateway: "Trendify Nexus Gateway"
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store"
       }
-    } catch {}
+    }
+  );
+}
+
+    if (url.pathname !== "/vless") {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    if (!RAILWAY_HOST || !RAILWAY_PORT) {
+      return new Response(
+        "Railway Proxy variables are not configured",
+        { status: 500 }
+      );
+    }
+
+    const upgrade = request.headers.get("Upgrade");
+
+    if (!upgrade || upgrade.toLowerCase() !== "websocket") {
+      return new Response("Expected WebSocket", {
+        status: 426,
+        headers: { Upgrade: "websocket" }
+      });
+    }
+
+    let socket;
 
     try {
-      if (reader) reader.cancel();
-    } catch {}
+      socket = connect({
+        hostname: RAILWAY_HOST,
+        port: RAILWAY_PORT
+      });
 
-    try {
-      if (writer) writer.abort();
-    } catch {}
-
-    try {
-      if (socket) socket.close();
-    } catch {}
-  }
-
-  function queueWrite(data) {
-    writeChain = writeChain.then(async function () {
-      if (closed || !writer) return;
-      await writer.write(await toBytes(data));
-    });
-
-    return writeChain;
-  }
-
-  server.addEventListener("message", function (event) {
-    if (closed) return;
-
-    if (!firstMessageReceived) {
-      firstMessageReceived = true;
-      clearTimeout(handshakeTimer);
-      resolveFirst(event.data);
-      return;
+      await socket.opened;
+    } catch (error) {
+      return new Response("TCP connection failed: " + error, {
+        status: 502
+      });
     }
 
-    if (!relayReady) {
-      pendingMessages.push(event.data);
-      return;
-    }
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
 
-    queueWrite(event.data).catch(closeAll);
-  });
+    server.accept();
+    server.binaryType = "arraybuffer";
 
-  server.addEventListener("close", function () {
-    if (!firstMessageReceived) {
-      rejectFirst(new Error("WebSocket closed before handshake"));
-    }
-    closeAll();
-  });
+    const writer = socket.writable.getWriter();
+    const reader = socket.readable.getReader();
 
-  server.addEventListener("error", function () {
-    if (!firstMessageReceived) {
-      rejectFirst(new Error("WebSocket handshake failed"));
-    }
-    closeAll();
-  });
-
-  try {
-    const firstMessage = await firstMessagePromise;
-    const firstBytes = await toBytes(firstMessage);
-
-    const uuid = uuidFromBytes(firstBytes);
-    await gatewayAuth(uuid, env);
-
-    socket = connect({
-      hostname: relayHost,
-      port: relayPort
-    });
-
-    await socket.opened;
-
-    writer = socket.writable.getWriter();
-    reader = socket.readable.getReader();
-
-    // Forward the original VLESS handshake unchanged to Railway.
-    await queueWrite(firstBytes);
-
-    // Flush any data received while the TCP connection was opening.
-    while (pendingMessages.length > 0) {
-      const message = pendingMessages.shift();
-      await queueWrite(message);
-    }
-
-    relayReady = true;
-
-    // TCP response -> WebSocket client.
-    (async function () {
+    server.addEventListener("message", async (event) => {
       try {
-        while (!closed) {
+        if (event.data instanceof ArrayBuffer) {
+          await writer.write(new Uint8Array(event.data));
+        } else if (event.data instanceof Blob) {
+          await writer.write(
+            new Uint8Array(await event.data.arrayBuffer())
+          );
+        } else if (ArrayBuffer.isView(event.data)) {
+          await writer.write(
+            new Uint8Array(
+              event.data.buffer,
+              event.data.byteOffset,
+              event.data.byteLength
+            )
+          );
+        }
+      } catch (error) {
+        try {
+          await writer.abort(error);
+        } catch {}
+      }
+    });
+
+    (async () => {
+      try {
+        while (true) {
           const result = await reader.read();
 
           if (result.done) break;
 
           if (
             result.value &&
-            result.value.byteLength > 0 &&
             server.readyState === WebSocket.OPEN
           ) {
             server.send(result.value);
           }
         }
-      } catch {
-      } finally {
-        closeAll();
-      }
+      } catch {}
     })();
+
+    server.addEventListener("close", async () => {
+      try {
+        await reader.cancel();
+      } catch {}
+
+      try {
+        await writer.close();
+      } catch {}
+
+      try {
+        socket.close();
+      } catch {}
+    });
 
     return new Response(null, {
       status: 101,
       webSocket: client
     });
-  } catch (error) {
-    closeAll();
-
-    return new Response(
-      "Gateway error: " + String(error && error.message || error),
-      {
-        status: 502,
-        headers: {
-          "content-type": "text/plain; charset=utf-8"
-        }
-      }
-    );
-  }
-}
-
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, X-Nexus-Gateway-Secret",
-          "Access-Control-Max-Age": "86400"
-        }
-      });
-    }
-
-    if (url.pathname === "/" || url.pathname === "/health") {
-      return json({
-        success: true,
-        gateway: "Trendify Nexus Gateway",
-        gateway_id: env.GATEWAY_ID || null,
-        region: env.GATEWAY_REGION || DEFAULT_REGION,
-        status: "online",
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    if (
-      url.pathname === "/ws" ||
-      url.pathname.startsWith("/ws/") ||
-      url.pathname === "/vless"
-    ) {
-      return handleVLESS(request, env);
-    }
-
-    return new Response("Not Found", { status: 404 });
   }
 };
 `;
 }
-
-
-/* =========================================================
-   WORKER FETCH
-========================================================= */
-
-export default {
-  async fetch(
-    request,
-    env
-  ) {
-    const url =
-      new URL(
-        request.url
-      );
-
-    if (
-      request.method ===
-      "OPTIONS"
-    ) {
-      return new Response(
-        null,
-        {
-          status: 204,
-          headers: {
-            "Access-Control-Allow-Origin":
-              "*",
-            "Access-Control-Allow-Methods":
-              "GET,POST,OPTIONS",
-            "Access-Control-Allow-Headers":
-              "Content-Type, X-Nexus-Gateway-Secret",
-            "Access-Control-Max-Age":
-              "86400"
-          }
-        }
-      );
-    }
-
-    if (
-      url.pathname === "/"
-    ) {
-      return json({
-        success: true,
-        gateway:
-          "Trendify Nexus Gateway",
-        gateway_id:
-          env.GATEWAY_ID ||
-          null,
-        region:
-          env.GATEWAY_REGION ||
-          DEFAULT_REGION,
-        status:
-          "online"
-      });
-    }
-
-    if (
-      url.pathname ===
-      "/health"
-    ) {
-      return json({
-        success: true,
-        status:
-          "online",
-        gateway_id:
-          env.GATEWAY_ID ||
-          null,
-        region:
-          env.GATEWAY_REGION ||
-          DEFAULT_REGION,
-        timestamp:
-          new Date().toISOString()
-      });
-    }
-
-    if (
-      url.pathname === "/ws" ||
-      url.pathname.startsWith(
-        "/ws/"
-      )
-    ) {
-      return handleVLESS(
-        request,
-        env
-      );
-    }
-
-    return new Response(
-      "Not Found",
-      {
-        status: 404,
-        headers: {
-          "access-control-allow-origin":
-            "*"
-        }
-      }
-    );
-  }
-};
-`;
-}
-
-/* =========================================================
-   CLOUDFLARE WORKER DEPLOYMENT
-========================================================= */
-
-
 
 /* =========================================================
    ENABLE WORKERS.DEV
 ========================================================= */
-
 async function enableWorkersDev(
   workerName
 ) {
@@ -4521,89 +4245,65 @@ async function getWorkersDevSubdomain() {
    TEST GATEWAY HEALTH
 ========================================================= */
 
-async function testGatewayHealth(
-  workerUrl
-) {
-  const base =
-    String(
-      workerUrl || ""
-    )
-      .trim()
-      .replace(
-        /\/+$/,
-        ""
-      );
+
+
+async function testGatewayHealth(workerUrl) {
+  const base = String(workerUrl || "")
+    .trim()
+    .replace(/\/+$/, "");
 
   if (!base) {
-    throw new Error(
-      "Gateway worker URL is empty"
-    );
+    throw new Error("Gateway worker URL is empty");
   }
 
-  const started =
-    Date.now();
+  let lastError = "Gateway health check failed";
 
-  const response =
-    await fetch(
-      `${base}/health`,
-      {
-        method:
-          "GET",
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const started = Date.now();
 
+      const response = await fetch(`${base}/health`, {
+        method: "GET",
         headers: {
-          Accept:
-            "application/json",
+          Accept: "application/json",
+          "Cache-Control": "no-cache"
+        },
+        signal: AbortSignal.timeout(10000)
+      });
 
-          "Cache-Control":
-            "no-cache"
-        }
+      const latency = Date.now() - started;
+      const text = await response.text();
+
+      let data = {};
+
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {}
+
+      if (response.ok && data?.success === true) {
+        return {
+          latency_ms: latency,
+          latency,
+          data
+        };
       }
-    );
 
-  const latency =
-    Date.now() -
-    started;
+      lastError =
+        `Gateway health returned HTTP ${response.status}: ${text}`;
+    } catch (error) {
+      lastError = String(error?.message || error);
+    }
 
-  const text =
-    await response.text();
-
-  let data;
-
-  try {
-    data =
-      text
-        ? JSON.parse(text)
-        : {};
-  } catch {
-    data = {};
+    if (attempt < 5) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
   }
 
-  if (!response.ok) {
-    throw new Error(
-      `Gateway health returned HTTP ${response.status}`
-    );
-  }
-
-  if (
-    data?.success !== true ||
-    data?.status !== "online"
-  ) {
-    throw new Error(
-      "Gateway health response is invalid"
-    );
-  }
-
-  return {
-    status:
-      "online",
-
-    latency_ms:
-      latency,
-
-    response:
-      data
-  };
+  throw new Error(
+    `Gateway health failed after 5 attempts: ${lastError}`
+  );
 }
+
 
 /* =========================================================
    CREATE CLOUDFLARE GATEWAY
@@ -4915,14 +4615,16 @@ async function deployGatewayWorker({
     );
   }
 
-  const nexusApiUrl =
-    publicBaseUrl();
+ const nexusApiUrl =
+  String(process.env.PUBLIC_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
 
-  if (!nexusApiUrl) {
-    throw new Error(
-      "PUBLIC_URL is required for gateway authentication"
-    );
-  }
+if (!nexusApiUrl) {
+  throw new Error(
+    "PUBLIC_URL is required to deploy a gateway"
+  );
+}
 
   const workerCode =
     getGatewayWorkerCode();
@@ -4967,31 +4669,28 @@ async function deployGatewayWorker({
       region: placement
     },
 
+    
     bindings: [
       {
         name: "GATEWAY_ID",
         type: "plain_text",
         text: String(gatewayId)
       },
-
       {
         name: "GATEWAY_REGION",
         type: "plain_text",
         text: normalizedRegion
       },
-
       {
         name: "NEXUS_API_URL",
         type: "plain_text",
         text: nexusApiUrl
       },
-
       {
         name: "NEXUS_GATEWAY_SECRET",
         type: "secret_text",
         text: gatewaySecret
-      }
-      
+      },
       {
         name: "RAILWAY_TCP_PROXY_DOMAIN",
         type: "plain_text",
@@ -5002,7 +4701,6 @@ async function deployGatewayWorker({
         type: "plain_text",
         text: String(railwayPort)
       }
-
     ]
   };
 
@@ -5012,8 +4710,7 @@ async function deployGatewayWorker({
    * -------------------------------------------------------
    */
 
-  const form =
-    new FormData();
+  const form =    new FormData();
 
   form.append(
     "metadata",
@@ -5706,4 +5403,3 @@ start().catch(error => {
 
   process.exit(1);
 });
-
